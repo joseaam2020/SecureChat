@@ -1,0 +1,5 @@
+.git
+__pycache__
+*.pyc
+instrucciones_taller.md
+keys/

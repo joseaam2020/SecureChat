@@ -1,0 +1,26 @@
+# Bob escucha, Alice se conecta a Bob. Ambos en la misma red de Docker.
+# Uso (en dos terminales):
+#   docker compose run --rm bob
+#   docker compose run --rm alice
+services:
+  bob:
+    build: .
+    image: securechat
+    hostname: bob
+    command: ["--name", "Bob", "--listen", "--port", "5000"]
+    stdin_open: true
+    tty: true
+    networks: [chat]
+
+  alice:
+    build: .
+    image: securechat
+    hostname: alice
+    command: ["--name", "Alice", "--connect", "bob", "--port", "5000"]
+    stdin_open: true
+    tty: true
+    depends_on: [bob]
+    networks: [chat]
+
+networks:
+  chat:
