@@ -1,4 +1,5 @@
 import argparse
+import os
 import socket
 import struct
 import sys
@@ -63,6 +64,7 @@ def connect(host: str, port: int) -> socket.socket:
 
 
 CONFIRMATION = b"SESSION_OK"
+closing = threading.Event()  # se activa cuando este lado cierra la sesion
 
 
 def handshake(sock, is_listener, private_key, peer_public_key) -> bytes:
@@ -90,14 +92,23 @@ def handshake(sock, is_listener, private_key, peer_public_key) -> bytes:
     return session_key
 
 
-def receiver(sock, peer: str):
+def receiver(sock, peer: str, session_key: bytes):
     try:
         while True:
-            msg = recv_frame(sock)
-            print(f"\r[{peer}] {msg.decode()}\n> ", end="", flush=True)
+            data = recv_frame(sock)
+            print(f"\r[<] Ciphertext recibido: {data.hex()}")
+            try:
+                # aes_decrypt verifica el tag antes de devolver el plaintext.
+                msg = aes_decrypt(session_key, data).decode()
+            except (InvalidTag, ValueError):
+                print("[!] RECHAZADO: autenticacion invalida, mensaje descartado\n> ", end="", flush=True)
+                continue
+            print(f"[{peer}] Plaintext recuperado: {msg}\n> ", end="", flush=True)
     except (ConnectionError, OSError):
-        print("\n[!] Conexion finalizada.")
-        sys.exit(0)
+        if not closing.is_set():
+            print(f"\n[!] {peer} cerro la conexion. Sesion finalizada.", flush=True)
+            # sys.exit() en un hilo no termina el proceso (el principal sigue en input()).
+            os._exit(0)
 
 
 def main():
@@ -130,19 +141,23 @@ def main():
     print(f"[+] SESION SEGURA ESTABLECIDA con {peer} (AES-256-GCM)")
     print(f"[+] Escribe mensajes ('/quit' para salir).")
 
-    threading.Thread(target=receiver, args=(sock, peer), daemon=True).start()
+    threading.Thread(target=receiver, args=(sock, peer, session_key), daemon=True).start()
 
     try:
         while True:
             line = input("> ")
             if line == "/quit":
                 break
-            # TODO Paso 4: cifrar con AES-256-GCM antes de enviar.
-            send_frame(sock, line.encode())
+            data = aes_encrypt(session_key, line.encode())
+            print(f"[>] Plaintext local: {line}")
+            print(f"[>] Ciphertext enviado (nonce+ct+tag): {data.hex()}")
+            send_frame(sock, data)
     except (EOFError, KeyboardInterrupt):
         pass
     finally:
+        closing.set()
         sock.close()
+        print("[+] Sesion finalizada.", flush=True)
 
 
 if __name__ == "__main__":
