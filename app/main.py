@@ -5,6 +5,12 @@ import sys
 import threading
 import time
 
+from app.crypto import (
+    generate_keypair,
+    public_key_from_bytes,
+    public_key_to_bytes,
+)
+
 
 def send_frame(sock, data: bytes):
     """Envia un mensaje con prefijo de longitud (4 bytes, big-endian)."""
@@ -69,10 +75,20 @@ def main():
 
     sock = listen(args.port) if args.listen else connect(args.connect, args.port)
 
-    # TODO Paso 2-3: generar claves RSA y hacer el handshake aqui.
-    # Por ahora se intercambian los nombres para identificar al par.
+    # Paso 2: par de claves RSA propio. La privada nunca sale de este proceso
+    # ni se imprime; solo se envia la publica.
+    print("[*] Generando par de claves RSA-2048...")
+    private_key = generate_keypair()
+    public_key = private_key.public_key()
+
     send_frame(sock, args.name.encode())
+    send_frame(sock, public_key_to_bytes(public_key))
     peer = recv_frame(sock).decode()
+    peer_public_key = public_key_from_bytes(recv_frame(sock))
+    print(f"[+] Clave publica de {peer} recibida (RSA-{peer_public_key.key_size})")
+
+    # TODO Paso 3: handshake -- cifrar la clave de sesion con rsa_encrypt(peer_public_key, ...)
+    # y recuperarla con rsa_decrypt(private_key, ...).
     print(f"[+] Conectado con {peer}. Escribe mensajes ('/quit' para salir).")
 
     threading.Thread(target=receiver, args=(sock, peer), daemon=True).start()
