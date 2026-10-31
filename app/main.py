@@ -9,6 +9,7 @@ import time
 from cryptography.exceptions import InvalidTag
 
 from app.crypto import (
+    NONCE_SIZE,
     SESSION_KEY_SIZE,
     aes_decrypt,
     aes_encrypt,
@@ -150,18 +151,30 @@ def main():
     except (ValueError, InvalidTag, ConnectionError) as e:
         sys.exit(f"[!] Handshake fallido: {e}")
     print(color(f"[+] SESION SEGURA ESTABLECIDA con {peer} (AES-256-GCM)", GREEN))
-    print(f"[+] Escribe mensajes ('/quit' para salir).")
+    print("[+] Escribe mensajes ('/quit' para salir, '/tamper' para alterar el siguiente).")
 
     threading.Thread(target=receiver, args=(sock, peer, session_key), daemon=True).start()
 
+    tamper_next = False
     try:
         while True:
             line = input("> ")
             if line == "/quit":
                 break
+            if line == "/tamper":
+                tamper_next = True
+                print(color("[TAMPER] El siguiente mensaje se enviara con 1 byte alterado.", RED))
+                continue
             data = aes_encrypt(session_key, line.encode())
             print(color(f"[>] Plaintext local: {line}", GREEN))
             print(color(f"[>] Ciphertext enviado (nonce+ct+tag): {data.hex()}", YELLOW))
+            if tamper_next:
+                tamper_next = False
+                # Invierte todos los bits del primer byte despues del nonce.
+                altered = bytearray(data)
+                altered[NONCE_SIZE] ^= 0xFF
+                data = bytes(altered)
+                print(color(f"[TAMPER] Ciphertext alterado (byte {NONCE_SIZE}): {data.hex()}", RED))
             send_frame(sock, data)
     except (EOFError, KeyboardInterrupt):
         pass
