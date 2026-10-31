@@ -1,5 +1,8 @@
+import os
+
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 RSA_KEY_SIZE = 2048
 
@@ -29,6 +32,26 @@ def public_key_from_bytes(data: bytes) -> rsa.RSAPublicKey:
     if not isinstance(key, rsa.RSAPublicKey) or key.key_size < RSA_KEY_SIZE:
         raise ValueError("Clave publica RSA invalida (se requieren >= 2048 bits)")
     return key
+
+
+SESSION_KEY_SIZE = 32  # 256 bits
+NONCE_SIZE = 12
+
+
+def generate_session_key() -> bytes:
+    """Clave AES-256 aleatoria de la sesion (CSPRNG del sistema operativo)."""
+    return AESGCM.generate_key(bit_length=SESSION_KEY_SIZE * 8)
+
+
+def aes_encrypt(key: bytes, plaintext: bytes) -> bytes:
+    """AES-256-GCM. Devuelve nonce (12) + ciphertext + tag (16)."""
+    nonce = os.urandom(NONCE_SIZE)
+    return nonce + AESGCM(key).encrypt(nonce, plaintext, None)
+
+
+def aes_decrypt(key: bytes, data: bytes) -> bytes:
+    """Verifica el tag y descifra. Lanza InvalidTag si fue alterado."""
+    return AESGCM(key).decrypt(data[:NONCE_SIZE], data[NONCE_SIZE:], None)
 
 
 def rsa_encrypt(public_key: rsa.RSAPublicKey, plaintext: bytes) -> bytes:

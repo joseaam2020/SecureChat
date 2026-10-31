@@ -5,10 +5,18 @@ import sys
 import threading
 import time
 
+from cryptography.exceptions import InvalidTag
+
 from app.crypto import (
+    SESSION_KEY_SIZE,
+    aes_decrypt,
+    aes_encrypt,
     generate_keypair,
+    generate_session_key,
     public_key_from_bytes,
     public_key_to_bytes,
+    rsa_decrypt,
+    rsa_encrypt,
 )
 
 
@@ -54,6 +62,34 @@ def connect(host: str, port: int) -> socket.socket:
     sys.exit(f"[!] No se pudo conectar a {host}:{port}")
 
 
+CONFIRMATION = b"SESSION_OK"
+
+
+def handshake(sock, is_listener, private_key, peer_public_key) -> bytes:
+    """Handshake hibrido. El que se conecta (Alice) genera la clave de sesion y
+    la envia cifrada con RSA-OAEP con la publica del que escucha (Bob)."""
+    if is_listener:
+        encrypted_key = recv_frame(sock)
+        print(f"[<] Clave de sesion cifrada recibida ({len(encrypted_key)} bytes)")
+        session_key = rsa_decrypt(private_key, encrypted_key)
+        if len(session_key) != SESSION_KEY_SIZE:
+            raise ValueError("clave de sesion con tamano invalido")
+        print("[+] Clave de sesion recuperada con mi clave privada")
+        # Confirmacion: ambos demuestran tener la misma clave usando AES-GCM.
+        send_frame(sock, aes_encrypt(session_key, CONFIRMATION))
+        if aes_decrypt(session_key, recv_frame(sock)) != CONFIRMATION:
+            raise ValueError("confirmacion de sesion invalida")
+    else:
+        session_key = generate_session_key()
+        encrypted_key = rsa_encrypt(peer_public_key, session_key)
+        send_frame(sock, encrypted_key)
+        print(f"[>] Clave de sesion generada y enviada cifrada ({len(encrypted_key)} bytes)")
+        if aes_decrypt(session_key, recv_frame(sock)) != CONFIRMATION:
+            raise ValueError("confirmacion de sesion invalida")
+        send_frame(sock, aes_encrypt(session_key, CONFIRMATION))
+    return session_key
+
+
 def receiver(sock, peer: str):
     try:
         while True:
@@ -87,9 +123,12 @@ def main():
     peer_public_key = public_key_from_bytes(recv_frame(sock))
     print(f"[+] Clave publica de {peer} recibida (RSA-{peer_public_key.key_size})")
 
-    # TODO Paso 3: handshake -- cifrar la clave de sesion con rsa_encrypt(peer_public_key, ...)
-    # y recuperarla con rsa_decrypt(private_key, ...).
-    print(f"[+] Conectado con {peer}. Escribe mensajes ('/quit' para salir).")
+    try:
+        session_key = handshake(sock, args.listen, private_key, peer_public_key)
+    except (ValueError, InvalidTag, ConnectionError) as e:
+        sys.exit(f"[!] Handshake fallido: {e}")
+    print(f"[+] SESION SEGURA ESTABLECIDA con {peer} (AES-256-GCM)")
+    print(f"[+] Escribe mensajes ('/quit' para salir).")
 
     threading.Thread(target=receiver, args=(sock, peer), daemon=True).start()
 
