@@ -63,6 +63,15 @@ def connect(host: str, port: int) -> socket.socket:
     sys.exit(f"[!] No se pudo conectar a {host}:{port}")
 
 
+# Colores ANSI; se desactivan si la salida no es una terminal (o con NO_COLOR).
+_USE_COLOR = sys.stdout.isatty() and "NO_COLOR" not in os.environ
+GREEN, YELLOW, CYAN, MAGENTA, RED = "32", "33", "36", "35", "1;31"
+
+
+def color(text: str, code: str) -> str:
+    return f"\033[{code}m{text}\033[0m" if _USE_COLOR else text
+
+
 CONFIRMATION = b"SESSION_OK"
 closing = threading.Event()  # se activa cuando este lado cierra la sesion
 
@@ -96,14 +105,16 @@ def receiver(sock, peer: str, session_key: bytes):
     try:
         while True:
             data = recv_frame(sock)
-            print(f"\r[<] Ciphertext recibido: {data.hex()}")
+            print(color(f"\r[<] Ciphertext recibido: {data.hex()}", MAGENTA))
             try:
                 # aes_decrypt verifica el tag antes de devolver el plaintext.
                 msg = aes_decrypt(session_key, data).decode()
             except (InvalidTag, ValueError):
-                print("[!] RECHAZADO: autenticacion invalida, mensaje descartado\n> ", end="", flush=True)
+                print(color("[!] RECHAZADO: autenticacion invalida, mensaje descartado", RED))
+                print("> ", end="", flush=True)
                 continue
-            print(f"[{peer}] Plaintext recuperado: {msg}\n> ", end="", flush=True)
+            print(color(f"[{peer}] Plaintext recuperado: {msg}", CYAN))
+            print("> ", end="", flush=True)
     except (ConnectionError, OSError):
         if not closing.is_set():
             print(f"\n[!] {peer} cerro la conexion. Sesion finalizada.", flush=True)
@@ -138,7 +149,7 @@ def main():
         session_key = handshake(sock, args.listen, private_key, peer_public_key)
     except (ValueError, InvalidTag, ConnectionError) as e:
         sys.exit(f"[!] Handshake fallido: {e}")
-    print(f"[+] SESION SEGURA ESTABLECIDA con {peer} (AES-256-GCM)")
+    print(color(f"[+] SESION SEGURA ESTABLECIDA con {peer} (AES-256-GCM)", GREEN))
     print(f"[+] Escribe mensajes ('/quit' para salir).")
 
     threading.Thread(target=receiver, args=(sock, peer, session_key), daemon=True).start()
@@ -149,8 +160,8 @@ def main():
             if line == "/quit":
                 break
             data = aes_encrypt(session_key, line.encode())
-            print(f"[>] Plaintext local: {line}")
-            print(f"[>] Ciphertext enviado (nonce+ct+tag): {data.hex()}")
+            print(color(f"[>] Plaintext local: {line}", GREEN))
+            print(color(f"[>] Ciphertext enviado (nonce+ct+tag): {data.hex()}", YELLOW))
             send_frame(sock, data)
     except (EOFError, KeyboardInterrupt):
         pass
